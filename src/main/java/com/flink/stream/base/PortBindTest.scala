@@ -1,4 +1,4 @@
-package com.scala.stream.base
+package com.flink.stream.base
 
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.minicluster.{MiniCluster, MiniClusterConfiguration}

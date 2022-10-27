@@ -1,4 +1,4 @@
-package com.scala.stream.base
+package com.flink.stream.base
 
 // 和spark一样，需要引入隐式转换
 
