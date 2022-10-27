@@ -4,14 +4,15 @@ import net.datafaker.Faker;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
+import org.apache.flink.table.functions.FunctionRequirement;
+import org.apache.flink.table.functions.LookupFunction;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import java.io.IOException;
+import java.util.*;
 
-public class FlinkFakerLookupFunction extends TableFunction<RowData> {
+public class FlinkFakerLookupFunction extends LookupFunction {
 
   private String[][] fieldExpressions;
   private Float[] fieldNullRates;
@@ -50,13 +51,14 @@ public class FlinkFakerLookupFunction extends TableFunction<RowData> {
     rand = new Random();
   }
 
-  public void eval(Object... keys) {
+  @Override
+  public Collection<RowData> lookup(RowData keyRow) throws IOException {
     GenericRowData row = new GenericRowData(fieldExpressions.length);
     int keyCount = 0;
     for (int i = 0; i < fieldExpressions.length; i++) {
       // 如果是关联的key, 直接赋值就行
       if (keyIndeces.contains(i)) {
-        row.setField(i, keys[keyCount]);
+        row.setField(i, ((GenericRowData) keyRow).getField(keyCount));
         keyCount++;
       } else {
         float fieldNullRate = fieldNullRates[i];
@@ -77,6 +79,16 @@ public class FlinkFakerLookupFunction extends TableFunction<RowData> {
         }
       }
     }
-    collect(row);
+    return Collections.singleton(row);
+  }
+
+  @Override
+  public Set<FunctionRequirement> getRequirements() {
+    return Collections.emptySet();
+  }
+
+  @Override
+  public boolean isDeterministic() {
+    return false;
   }
 }

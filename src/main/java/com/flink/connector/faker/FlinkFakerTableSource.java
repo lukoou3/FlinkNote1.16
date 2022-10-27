@@ -11,7 +11,9 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.*;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
+import org.apache.flink.table.connector.source.lookup.LookupFunctionProvider;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.functions.LookupFunction;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 
@@ -119,9 +121,16 @@ public class FlinkFakerTableSource
      *    关联的条件是i和s2, 则keys = [[0], [2, 1]]
      *
      */
-    return TableFunctionProvider.of(
+    return new LookupFunctionProvider() {
+      @Override
+      public LookupFunction createLookupFunction() {
+        return new FlinkFakerLookupFunction(
+                fieldExpressions, fieldNullRates, fieldCollectionLengths, types, context.getKeys());
+      }
+    };
+    /*return TableFunctionProvider.of(
         new FlinkFakerLookupFunction(
-            fieldExpressions, fieldNullRates, fieldCollectionLengths, types, context.getKeys()));
+            fieldExpressions, fieldNullRates, fieldCollectionLengths, types, context.getKeys()));*/
   }
 
   /**
