@@ -1,27 +1,11 @@
 package com.flink.connector.test
 
-import org.apache.flink.configuration.Configuration
+import com.flink.base.FlinkBaseSuite
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.table.api.bridge.scala._
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.funsuite.AnyFunSuite
 
-class FlinkFakerSuite extends AnyFunSuite with BeforeAndAfterAll{
-  var env: StreamExecutionEnvironment = _
-  var tEnv: StreamTableEnvironment = _
-
-  override protected def beforeAll(): Unit = {
-    val conf = new Configuration()
-    env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(conf)
-    env.setParallelism(1)
-    env.getConfig.enableObjectReuse()
-
-    // Flink 1.14后，旧的planner被移除了，默认就是BlinkPlanner
-    //val settings = EnvironmentSettings.newInstance().inStreamingMode().build()
-    //tEnv = StreamTableEnvironment.create(env, settings)
-    // 其实直接这样就行
-    tEnv = StreamTableEnvironment.create(env)
-  }
+class FlinkFakerSuite extends FlinkBaseSuite{
+  override def parallelism: Int = 1
 
   test("ScanTableSource"){
     var sql = """
@@ -160,9 +144,5 @@ class FlinkFakerSuite extends AnyFunSuite with BeforeAndAfterAll{
 
     rstTable.execute().print()
     //rstTable.toAppendStream[Row].print()
-  }
-
-  override protected def afterAll(): Unit = {
-    env.execute()
   }
 }

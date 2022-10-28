@@ -1,29 +1,14 @@
 package com.flink.stream.window
 
-import org.apache.flink.configuration.Configuration
+import com.flink.base.FlinkBaseSuite
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.table.api.bridge.scala._
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.funsuite.AnyFunSuite
 
-class TumblingProcessingTimeWindowSuite extends AnyFunSuite with BeforeAndAfterAll{
-  var env: StreamExecutionEnvironment = _
-  var tEnv: StreamTableEnvironment = _
 
-  override protected def beforeAll(): Unit = {
-    val conf = new Configuration()
-    env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(conf)
-    env.setParallelism(1)
-    env.getConfig.enableObjectReuse()
-
-    // Flink 1.14后，旧的planner被移除了，默认就是BlinkPlanner
-    //val settings = EnvironmentSettings.newInstance().inStreamingMode().build()
-    //tEnv = StreamTableEnvironment.create(env, settings)
-    // 其实直接这样就行
-    tEnv = StreamTableEnvironment.create(env)
-  }
+class TumblingProcessingTimeWindowSuite extends FlinkBaseSuite{
+  override def parallelism: Int = 1
 
   test("TumblingProcessingTimeWindow"){
     // 每秒2个，5秒10个
@@ -56,8 +41,4 @@ class TumblingProcessingTimeWindowSuite extends AnyFunSuite with BeforeAndAfterA
 
   }
 
-
-  override protected def afterAll(): Unit = {
-    env.execute()
-  }
 }

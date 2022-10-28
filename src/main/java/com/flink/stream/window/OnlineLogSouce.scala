@@ -24,7 +24,7 @@ class OnlineLogSouce(val count: Int = 5, val sleepMillis: Long = 1000L, pageNum:
     val random = new Random()
     var i = 0
     val beginTime = System.currentTimeMillis()/1000*1000
-    val fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+    val fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
 
     while(running){
       for (_ <- (1 to this.count)) {
@@ -32,7 +32,7 @@ class OnlineLogSouce(val count: Int = 5, val sleepMillis: Long = 1000L, pageNum:
         val userId = random.nextInt(100).toString
         val eventTime = beginTime + i * 500
         val time = System.currentTimeMillis()
-        println(eventTime, fmt.format(new Date(eventTime)))
+        println(s"eventTime:$eventTime,${fmt.format(new Date(eventTime))};ProcessTime:$time,${fmt.format(new Date(time))}")
         ctx.collect(
           OnlineLog(pageId, userId, eventTime, time, fmt.format(new Date(eventTime)), fmt.format(new Date(time)), 1)
         )
