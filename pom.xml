@@ -77,6 +77,18 @@
             <scope>${libs.online.scope}</scope>
         </dependency>
 
+        <!--JDBC SQL Connector-->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-jdbc</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>5.1.45</version>
+        </dependency>
+
         <!-- Add connector dependencies here. They must be in the default scope (compile). -->
 
         <!-- Example:
@@ -87,6 +99,15 @@
             <version>${flink.version}</version>
         </dependency>
         -->
+
+        <!-- https://mvnrepository.com/artifact/org.apache.flink/flink-test-utils -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-test-utils</artifactId>
+            <version>${flink.version}</version>
+            <scope>${libs.online.scope}</scope>
+        </dependency>
+
 
         <dependency>
             <groupId>com.google.guava</groupId>
