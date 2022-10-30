@@ -1,12 +1,13 @@
 package com.flink.base
 
+import com.flink.log.Logging
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.table.api.bridge.scala._
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 
-abstract class FlinkBaseSuite extends AnyFunSuite with BeforeAndAfterAll{
+abstract class FlinkBaseSuite extends AnyFunSuite with BeforeAndAfterAll with Logging{
   var env: StreamExecutionEnvironment = _
   var tEnv: StreamTableEnvironment = _
 

@@ -7,7 +7,6 @@ import org.apache.flink.streaming.api.scala._
 import scala.beans.BeanProperty
 import PojoClassSerializeSuite._
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.types.PojoTestUtils
 
 /**
  * [[org.apache.flink.api.java.typeutils.runtime.PojoSerializer]]
