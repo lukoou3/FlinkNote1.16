@@ -7,7 +7,7 @@ import org.apache.flink.table.api.bridge.scala._
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 
-abstract class FlinkBaseSuite extends AnyFunSuite with BeforeAndAfterAll with Logging{
+abstract class FlinkBaseSuite extends AnyFunSuite with BeforeAndAfterAll{
   var env: StreamExecutionEnvironment = _
   var tEnv: StreamTableEnvironment = _
 
