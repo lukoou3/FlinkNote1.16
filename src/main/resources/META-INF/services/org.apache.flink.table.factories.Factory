@@ -1,1 +1,2 @@
 com.flink.connector.faker.FlinkFakerTableSourceFactory
+com.flink.connector.socket.SocketDynamicTableFactory
