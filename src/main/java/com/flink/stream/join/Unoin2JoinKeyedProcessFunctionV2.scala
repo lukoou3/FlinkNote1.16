@@ -166,7 +166,7 @@ object Unoin2JoinKeyedProcessFunctionV2{
           data
         }
       })(typeInfo).setParallelism(ds2.parallelism)
-    ).keyBy(_.key)(keyTypeInfo)
+    ).keyBy( (x: Unoin2Data[K, D1, D2]) => x.key)(keyTypeInfo)
   }
 
   class ReplaceAndHandleDataTip private[Unoin2JoinKeyedProcessFunctionV2] extends Serializable {

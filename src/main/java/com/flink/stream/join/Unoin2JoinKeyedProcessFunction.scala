@@ -121,9 +121,9 @@ object Unoin2JoinKeyedProcessFunction {
 
   def union[D1, D2, K](ds1: DataStream[D1], ds2: DataStream[D2])(getKey1: D1 => K, getKey2: D2 => K)
     (implicit typeInfo:TypeInformation[(K, Option[D1], Option[D2])], keyTypeInfo:TypeInformation[K]): KeyedStream[(K, Option[D1], Option[D2]), K] ={
-    ds1.map(x => (getKey1(x), Option(x), None: Option[D2]))(typeInfo).setParallelism(ds1.parallelism).union(
-      ds2.map(x => (getKey2(x), None: Option[D1], Option(x)))(typeInfo).setParallelism(ds2.parallelism)
-    ).keyBy(_._1)(keyTypeInfo)
+    ds1.map( (x: D1) => (getKey1(x), Option(x), None: Option[D2]))(typeInfo).setParallelism(ds1.parallelism).union(
+      ds2.map((x: D2) => (getKey2(x), None: Option[D1], Option(x)))(typeInfo).setParallelism(ds2.parallelism)
+    ).keyBy((x:(K, Option[D1], Option[D2])) => x._1)(keyTypeInfo)
   }
 
 }
