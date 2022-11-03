@@ -1,6 +1,6 @@
 package com.note.flink.stream.func
 
-import com.note.flink.log.Logging
+import com.flink.log.Logging
 import org.apache.flink.api.common.functions.{FlatMapFunction, MapFunction}
 import org.apache.flink.api.common.operators.ProcessingTimeService.ProcessingTimeCallback
 import org.apache.flink.api.common.state.{ListState, ListStateDescriptor}
@@ -14,16 +14,30 @@ import org.apache.flink.util.Collector
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConverters._
 
+/**
+ *
+ * @param batchSize               batchSize
+ * @param batchIntervalMs         batchIntervalMs
+ * @param minPauseBetweenFlushMs  定时器Flush和上次Flush最小间隔
+ * @param useState                使用状态(默认为true), 会校验必须开启cp, 不使用状态会丢数据
+ * @param isChainHead             ChainingStrategy.HEAD(默认为true)
+ * @param flatMapper              处理元素输出到下游, 输入的batch seq是同一个对象, 下游不能缓存batch seq。
+ *                                支持rich func的open和close, 不支持状态。
+ * @tparam T
+ * @tparam O
+ */
 class BatchIntervalFlatMapOperator[T: TypeInformation, O] private(
   val batchSize: Int,
   val batchIntervalMs: Long,
   val minPauseBetweenFlushMs: Long,
   val useState: Boolean,
   val isChainHead: Boolean,
-  val flatMapper: FlatMapFunction[Seq[T], O]
+  val flatMapper: FlatMapFunction[Seq[T], O],
+  val useEventTime: Boolean
 ) extends AbstractStreamOperator[O] with OneInputStreamOperator[T, O] with ProcessingTimeCallback with Logging {
   val batch = new ArrayBuffer[T]
   var hasTimestamp = false
+  var timestamp = 0L
   @transient var lastFlushTs = 0L
   @transient var listState: ListState[T] = _
   @transient var collector: TimestampedCollector[O] = _
@@ -75,8 +89,11 @@ class BatchIntervalFlatMapOperator[T: TypeInformation, O] private(
   }
 
   override def processElement(element: StreamRecord[T]): Unit = {
-    collector.setTimestamp(element)
-    hasTimestamp = true
+    if(useEventTime){
+      timestamp = math.max(timestamp, element.getTimestamp)
+      collector.setAbsoluteTimestamp(timestamp)
+      hasTimestamp = true
+    }
     batch += element.getValue
     if(batch.size >= batchSize){
       flush()
@@ -84,6 +101,9 @@ class BatchIntervalFlatMapOperator[T: TypeInformation, O] private(
   }
 
   final def flush(): Unit = synchronized {
+    if(useEventTime && !hasTimestamp){
+      return
+    }
     lastFlushTs = System.currentTimeMillis()
     flatMapper.flatMap(batch, collector)
     batch.clear()
@@ -123,9 +143,10 @@ object BatchIntervalFlatMapOperator {
       batchIntervalMs: Long,
       minPauseBetweenFlushMs: Long = 100L,
       useState: Boolean = true,
-      isChainHead: Boolean = true
+      isChainHead: Boolean = true,
+      useEventTime: Boolean = false
     )(flatMapper: FlatMapFunction[Seq[T], O])(implicit dataType: TypeInformation[T], outType: TypeInformation[O]): DataStream[O] = {
-      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper)
+      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper, useEventTime)
       ds.transform("batch-interval-op", operator)
     }
 
@@ -134,12 +155,13 @@ object BatchIntervalFlatMapOperator {
       batchIntervalMs: Long,
       minPauseBetweenFlushMs: Long = 100L,
       useState: Boolean = true,
-      isChainHead: Boolean = true
+      isChainHead: Boolean = true,
+      useEventTime: Boolean = false
     )(func: (Seq[T], Collector[O]) => Unit)(implicit dataType: TypeInformation[T], outType: TypeInformation[O]): DataStream[O] = {
       val flatMapper = new FlatMapFunction[Seq[T], O] {
         def flatMap(in: Seq[T], out: Collector[O]){ func(in, out) }
       }
-      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper)
+      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper, useEventTime)
       ds.transform("batch-interval-op", operator)
     }
 
@@ -148,12 +170,13 @@ object BatchIntervalFlatMapOperator {
       batchIntervalMs: Long,
       minPauseBetweenFlushMs: Long = 100L,
       useState: Boolean = true,
-      isChainHead: Boolean = true
+      isChainHead: Boolean = true,
+      useEventTime: Boolean = false
     )(func: Seq[T] => TraversableOnce[O])(implicit dataType: TypeInformation[T], outType: TypeInformation[O]): DataStream[O] = {
       val flatMapper = new FlatMapFunction[Seq[T], O] {
         def flatMap(in: Seq[T], out: Collector[O]) { func(in) foreach out.collect }
       }
-      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper)
+      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper, useEventTime)
       ds.transform("batch-interval-op", operator)
     }
 
@@ -162,12 +185,13 @@ object BatchIntervalFlatMapOperator {
       batchIntervalMs: Long,
       minPauseBetweenFlushMs: Long = 100L,
       useState: Boolean = true,
-      isChainHead: Boolean = true
+      isChainHead: Boolean = true,
+      useEventTime: Boolean = false
     )(mapper: MapFunction[Seq[T], O])(implicit dataType: TypeInformation[T], outType: TypeInformation[O]): DataStream[O] = {
       val flatMapper = new FlatMapFunction[Seq[T], O] {
         def flatMap(in: Seq[T], out: Collector[O]){ out.collect(mapper.map(in)) }
       }
-      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper)
+      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper, useEventTime)
       ds.transform("batch-interval-op", operator)
     }
 
@@ -176,12 +200,13 @@ object BatchIntervalFlatMapOperator {
       batchIntervalMs: Long,
       minPauseBetweenFlushMs: Long = 100L,
       useState: Boolean = true,
-      isChainHead: Boolean = true
+      isChainHead: Boolean = true,
+      useEventTime: Boolean = false
     )(func: Seq[T] => O)(implicit dataType: TypeInformation[T], outType: TypeInformation[O]): DataStream[O] = {
       val flatMapper = new FlatMapFunction[Seq[T], O] {
         def flatMap(in: Seq[T], out: Collector[O]){ out.collect(func(in)) }
       }
-      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper)
+      val operator = new BatchIntervalFlatMapOperator[T, O](batchSize, batchIntervalMs, minPauseBetweenFlushMs, useState, isChainHead, flatMapper, useEventTime)
       ds.transform("batch-interval-op", operator)
     }
 
