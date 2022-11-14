@@ -7,6 +7,9 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.table.api.bridge.scala._
 import HandleInsertOnlyStreamSuite._
 import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.table.api.Schema
+import org.apache.flink.table.api.bridge.scala.internal.StreamTableEnvironmentImpl
+import org.apache.flink.table.types.utils.TypeInfoDataTypeConverter
 
 /**
  * 之前的直接通过传入可变参数重命名列名和定义处理/事件时间的方法被标记废弃了
@@ -39,6 +42,57 @@ class HandleInsertOnlyStreamSuite extends FlinkBaseSuite{
     val typeInformation2 = implicitly[TypeInformation[People]]
     println(typeInformation1)
     println(typeInformation2)
+  }
+
+  test("ds转table_fromDataStream") {
+    val datas = Seq(
+      People(1, "aaa", 20, 90.2, Instant.ofEpochMilli(1000)),
+      People(2, "bb", 22, 90.2, Instant.ofEpochMilli(1001)),
+      People(3, "cc", 21, 90.2, Instant.ofEpochMilli(1002))
+    )
+
+    // scala类的typeinfo要使用scala隐式参数推导，TypeInformation.of(classOf[People])这种方式并不能解析的到
+    //val ds = env.fromCollection(datas)(TypeInformation.of(classOf[People]))
+    val ds = env.fromCollection(datas)
+
+    //val inputTypeInfo = TypeInformation.of(classOf[People])
+    val inputTypeInfo = implicitly[TypeInformation[People]]
+    val inputDataType = TypeInfoDataTypeConverter.toDataType(tEnv.asInstanceOf[StreamTableEnvironmentImpl].getCatalogManager.getDataTypeFactory,
+      inputTypeInfo)
+    println(inputDataType)
+
+    /**
+     * new DataStructureConverterWrapper(DataStructureConverters.getConverter(producedDataType))
+     *    org.apache.flink.table.runtime.connector.source.DataStructureConverterWrapper:
+     *        structureConverter.toInternalOrNull(externalStructure)
+     *    org.apache.flink.table.runtime.connector.sink.DataStructureConverterWrapper:
+     *        structureConverter.toExternalOrNull(internalStructure)
+     *
+     * 自动推断所有的physical columns
+     * ds的.TypeInfo和sql的DataType的对应关系在：[[org.apache.flink.table.types.utils.TypeInfoDataTypeConverter.conversionMap]]
+     * Instant对应TIMESTAMP_LTZ
+     * sql内部的类型对应关系可以看：LogicalTypeUtils.toInternalConversionClass
+     * sql类型的实际转化例子可以看官方实现的connector的读写，可以json转化的实现为例查看：JsonToRowDataConverters和RowDataToJsonConverters
+     */
+    var table = tEnv.fromDataStream(ds)
+    table.printSchema()
+
+    /**
+     * 自动推断所有的physical columns
+     * 同时添加计算列
+     */
+    table = tEnv.fromDataStream(ds, Schema.newBuilder()
+      .columnByExpression("rowtime", "CAST(event_time AS TIMESTAMP_LTZ(3))")
+      .columnByExpression("proc_time", "PROCTIME()")
+      .watermark("rowtime", "rowtime - INTERVAL '10' SECOND")
+      .build()
+    )
+    table.printSchema()
+
+    //table.execute().print()
+    table.toDataStream.addSink {
+      row => println(row)
+    }
   }
 
 }
