@@ -9,7 +9,10 @@ import HandleInsertOnlyStreamSuite._
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.table.api.Schema
 import org.apache.flink.table.api.bridge.scala.internal.StreamTableEnvironmentImpl
+import org.apache.flink.table.data.RowData
+import org.apache.flink.table.types.DataType
 import org.apache.flink.table.types.utils.TypeInfoDataTypeConverter
+import org.apache.flink.types.Row
 
 /**
  * 之前的直接通过传入可变参数重命名列名和定义处理/事件时间的方法被标记废弃了
@@ -92,6 +95,80 @@ class HandleInsertOnlyStreamSuite extends FlinkBaseSuite{
     //table.execute().print()
     table.toDataStream.addSink {
       row => println(row)
+    }
+  }
+
+  test("ds转table_fromDataStream_DataStream[Row]") {
+    val sql =
+      """
+    CREATE TABLE tmp_tb1 (
+      name string,
+      age int,
+      cnt bigint,
+      proctime as proctime()
+    ) WITH (
+      'connector' = 'faker',
+      'fields.name.expression' = '#{superhero.name}',
+      'fields.age.expression' = '#{number.numberBetween ''0'',''20''}',
+      'fields.cnt.expression' = '#{number.numberBetween ''0'',''20000000000''}',
+      'rows-per-second' = '1'
+    )
+    """
+    tEnv.executeSql(sql)
+
+    val table = tEnv.sqlQuery("select * from tmp_tb1")
+
+    val rowDs: DataStream[Row] = table.toDataStream
+    println(rowDs.dataType)
+
+    /**
+     * [[org.apache.flink.table.runtime.operators.source.InputConversionOperator]]
+     * internalRecord = converter.toInternal(externalRecord)
+     * [[org.apache.flink.table.data.conversion.RowRowConverter]]
+     */
+    val rstTable = tEnv.fromDataStream(rowDs)
+
+
+    rstTable.toDataStream.addSink { row =>
+      println(row)
+    }
+  }
+
+  test("ds转table_fromDataStream_DataStream[RowData]") {
+    val sql =
+      """
+    CREATE TABLE tmp_tb1 (
+      name string,
+      age int,
+      cnt bigint,
+      proctime as proctime()
+    ) WITH (
+      'connector' = 'faker',
+      'fields.name.expression' = '#{superhero.name}',
+      'fields.age.expression' = '#{number.numberBetween ''0'',''20''}',
+      'fields.cnt.expression' = '#{number.numberBetween ''0'',''20000000000''}',
+      'rows-per-second' = '1'
+    )
+    """
+    tEnv.executeSql(sql)
+
+    val table = tEnv.sqlQuery("select * from tmp_tb1")
+
+    val rowDataDataType: DataType = table.getResolvedSchema.toPhysicalRowDataType.bridgedTo(classOf[RowData])
+    val rowDataDs: DataStream[RowData] = table.toDataStream[RowData](rowDataDataType)
+    //val rowDataDs: DataStream[RowData] = table.toAppendStream[RowData]
+    val dataType = rowDataDs.dataType
+    println(rowDataDs.dataType)
+
+    /**
+     * [[org.apache.flink.table.runtime.operators.source.InputConversionOperator]]
+     * internalRecord = converter.toInternal(externalRecord)
+     * [[org.apache.flink.table.data.conversion.IdentityConverter]]
+     */
+    val rstTable = tEnv.fromDataStream(rowDataDs)
+
+    rstTable.toDataStream.addSink { row =>
+      println(row)
     }
   }
 
