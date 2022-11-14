@@ -10,6 +10,7 @@ import org.scalatest.funsuite.AnyFunSuite
 abstract class FlinkBaseSuite extends AnyFunSuite with BeforeAndAfterAll{
   var env: StreamExecutionEnvironment = _
   var tEnv: StreamTableEnvironment = _
+  var execute = true
 
   def parallelism: Int
 
@@ -27,6 +28,8 @@ abstract class FlinkBaseSuite extends AnyFunSuite with BeforeAndAfterAll{
   }
 
   override protected def afterAll(): Unit = {
-    env.execute()
+    if(execute){
+      env.execute()
+    }
   }
 }
