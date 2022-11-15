@@ -21,6 +21,7 @@ import org.apache.flink.types.Row
  * 这些方法都被标记废弃了，之后的版本可能会删除：fromDataStream(stream, $"myLong", $"myString")/toAppendStream/toRetractStream
  * 新版本使用这几个方法：fromDataStream/toDataStream, fromChangelogStream/toChangelogStream
  * https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/data_stream_api/#examples-for-fromdatastream
+ * https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/data_stream_api/#examples-for-fromchangelogstream
  * https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/data_stream_api/#legacy-conversion
  *
  * InsertOnly的Stream和table的转化有下面几个函数可以使用：
