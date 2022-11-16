@@ -16,7 +16,6 @@ import org.apache.orc.{OrcFile, Reader, TypeDescription}
 import scala.annotation.varargs
 import scala.io.Source
 import scala.collection.JavaConverters._
-
 import com.flink.log.Logging
 import com.flink.utils.{LoadIntervalDataUtil, SingleValueMap, Utils}
 import com.flink.utils.SingleValueMap.ResourceData
@@ -37,6 +36,10 @@ class FileSystemRowDataLookupFunction(
   @transient lazy val fs = new Path(path).getFileSystem(new org.apache.hadoop.conf.Configuration())
 
   override def open(context: FunctionContext): Unit = {
+    if(deserializer != null){
+      // JsonRowDataDeserializationSchema的open没使用context
+      deserializer.open(null)
+    }
     keyFieldGetters = keyIndices.map(i => RowData.createFieldGetter(fieldInfos(i)._2.getLogicalType, i))
     cache = SingleValueMap.acquireResourceData(path, LoadIntervalDataUtil(intervalMs = cacheExpireMs) {
       if(isOrc) fetchDatasFromOrcFile() else fetchDatasFromTextFile()

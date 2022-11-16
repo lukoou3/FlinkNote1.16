@@ -2,3 +2,4 @@ com.flink.connector.faker.FlinkFakerTableSourceFactory
 com.flink.connector.socket.SocketDynamicTableFactory
 com.flink.connector.log.LogTableSinkFactory
 com.flink.connector.localfile.LocalFileTableFactory
+com.flink.connector.filesystem.FileSystemTableFactory
