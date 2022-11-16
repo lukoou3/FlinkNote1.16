@@ -4,3 +4,4 @@ com.flink.connector.log.LogTableSinkFactory
 com.flink.connector.localfile.LocalFileTableFactory
 com.flink.connector.filesystem.FileSystemTableFactory
 com.flink.connector.jdbc.JdbcTableFactory
+com.flink.connector.es.EsTableFactory
