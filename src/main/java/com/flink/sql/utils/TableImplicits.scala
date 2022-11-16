@@ -4,7 +4,7 @@ import java.util
 
 import com.alibaba.fastjson.JSON
 import com.flink.serialization.SerializationSchemaLogWrapper
-import com.flink.stream.func.DeserializeFunc
+import com.flink.stream.func.{DeserializeFunc, SerializeFunc}
 import org.apache.flink.api.common.functions.{FlatMapFunction, RichMapFunction}
 import org.apache.flink.api.common.serialization.SerializationSchema
 import org.apache.flink.api.common.typeinfo.{PrimitiveArrayTypeInfo, TypeInformation}
@@ -15,6 +15,7 @@ import org.apache.flink.table.api.bridge.scala._
 import org.apache.flink.table.api.bridge.scala.internal.StreamTableEnvironmentImpl
 import org.apache.flink.table.api.internal.TableImpl
 import org.apache.flink.table.api.{Schema, Table}
+import org.apache.flink.table.connector.ChangelogMode
 import org.apache.flink.table.data.RowData
 import org.apache.flink.table.runtime.types.TypeInfoDataTypeConverter
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo
@@ -30,6 +31,23 @@ import scala.reflect.ClassTag
 object TableImplicits {
 
   implicit class TableOps(table: Table) {
+    def toRowDataDataStream: DataStream[RowData] = {
+      val rowDataDataType: DataType = table.getResolvedSchema.toPhysicalRowDataType.bridgedTo(classOf[RowData])
+      new TableConversions(table).toDataStream[RowData](rowDataDataType)
+    }
+
+    def toJsonDataStreamInternal(changelogMode: ChangelogMode = ChangelogMode.insertOnly()): DataStream[Array[Byte]] = {
+      if(changelogMode.containsOnly(RowKind.INSERT)){
+        val rowDataDataType: DataType = table.getResolvedSchema.toPhysicalRowDataType.bridgedTo(classOf[RowData])
+        val rowDataDs: DataStream[RowData] = table.toDataStream[RowData](rowDataDataType)
+        val rstDs: DataStream[Array[Byte]] = rowDataDs.map(new SerializeFunc(table.getJsonRowDataSerializationSchema))
+        rstDs
+      }
+      else{
+        throw new Exception("暂不支持")
+      }
+    }
+
     def toRetractStreamOnlyAdd[T: TypeInformation]: DataStream[T] = {
       new TableConversions(table).toRetractStream[T].flatMap(new FlatMapFunction[(Boolean, T), T] {
         override def flatMap(value: (Boolean, T), out: Collector[T]): Unit = {
