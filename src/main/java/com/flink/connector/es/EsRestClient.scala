@@ -41,6 +41,19 @@ class EsRestClient(
     func(response.code, response.body)
   }
 
+  def put[T](path:String, body: String = null, connTimeoutMs: Int = 1000 * 3, readTimeoutMs: Int = 1000 * 5)(func:(Int, String) => T): T = {
+    val response: HttpResponse[String] = retryRequest{
+      val url = host + (if(path.startsWith("/")) path.substring(1) else path)
+      val request: HttpRequest = if (body == null) {
+        Http(url).headers(headers).method("PUT").timeout(connTimeoutMs, readTimeoutMs)
+      } else {
+        Http(url).headers(headers).put(body).timeout(connTimeoutMs, readTimeoutMs)
+      }
+      request.asString
+    }
+    func(response.code, response.body)
+  }
+
   private def selectNextHost(): Boolean = {
     if (nextHost >= hosts.size) {
       false
