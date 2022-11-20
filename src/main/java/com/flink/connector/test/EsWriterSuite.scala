@@ -458,4 +458,47 @@ class EsWriterSuite extends AnyFunSuite{
     esWriter.close()
   }
 
+  /**
+   * delete:删除指定的id，删除不存在的id会报错。
+   * 然而在这个EsWriter中，删除不存在的id没有报错。
+   */
+  test("delete"){
+    val cfg = Map(
+      ES_RESOURCE_WRITE -> "poetry_test/poem_test",
+      ES_WRITE_OPERATION -> "delete",
+      ES_MAPPING_ID -> "_id",
+      // 发生异常打印日志，放弃重试。org.elasticsearch.hadoop.handler.impl.AbortOnFailure
+      "es.write.rest.error.handlers" -> "log",
+      "es.write.rest.error.handler.log.logger.name" -> "loges"
+    )
+    val esWriter = new EsWriter[Map[String, Any]](cfg)
+    esWriter.init()
+
+    val datas = Seq(
+      Map("_id" -> "12", "title" -> "赠妓云英"),
+      Map("_id" -> "11", "title" -> "过故洛阳城"),
+      Map("_id" -> "13", "title" -> "芙蓉楼送辛渐"),
+      Map("_id" -> "14", "title" -> "乌衣巷")
+    )
+
+    /**
+     * poetry_test/poem_test/_bulk
+     *
+     * debugger查看发送的body
+     * [[org.elasticsearch.hadoop.rest.RestRepository#doWriteToIndex]] payload属性就是body
+     * [[org.elasticsearch.hadoop.rest.bulk.BulkProcessor#tryFlush]] data属性就是body
+     *
+     * {"delete":{"_id":"12"}}
+     * {"delete":{"_id":"11"}}
+     * {"delete":{"_id":"13"}}
+     * {"delete":{"_id":"14"}}
+     */
+    for (data <- datas) {
+      esWriter.write(data)
+    }
+
+    esWriter.flush()
+    esWriter.close()
+  }
+
 }

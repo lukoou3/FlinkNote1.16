@@ -27,7 +27,7 @@ class EsWriter[T](val cfg: Map[String, String]) extends Serializable {
     val defaultCfg = Map(
       ES_MAPPING_DATE_RICH_OBJECT -> "false",
       ES_INDEX_AUTO_CREATE -> "false"
-    ) ++ (if(cfg.getOrElse(ES_INPUT_JSON, "false") != "true") Map(ES_MAPPING_EXCLUDE -> "_id") else  Map.empty)
+    ) ++ (if(cfg.getOrElse(ES_INPUT_JSON, "false") != "true" && cfg.getOrElse(ES_WRITE_OPERATION, "index") != "delete") Map(ES_MAPPING_EXCLUDE -> "_id") else  Map.empty)
     val rstCfg = defaultCfg ++ cfg
     props.putAll(rstCfg.asJava)
 
