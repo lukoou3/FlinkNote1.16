@@ -16,18 +16,31 @@ abstract class BatchIntervalJdbcSink[T](
   minPauseBetweenFlushMs: Long = 100L,
   keyedMode: Boolean = false,
   maxRetries: Int = 2,
-  periodExecSqlStrategy: PeriodExecSqlStrategy = null
-) extends BatchIntervalSink[T](batchSize, batchIntervalMs, minPauseBetweenFlushMs, keyedMode) with Logging {
+  periodExecSqlStrategy: PeriodExecSqlStrategy = null,
+  hasDelete: Boolean = false
+) extends BatchIntervalSink[T](batchSize, batchIntervalMs, minPauseBetweenFlushMs, keyedMode) {
   @transient var conn: Connection = _
   @transient var stmt: PreparedStatement = _
+  @transient var deleteStmt: PreparedStatement = _
 
   def updateSql: String
 
+  def deleteSql: String = throw new Exception("hasDelete时必须实现")
+
+  def isDeleteData(data: T): Boolean = throw new Exception("hasDelete时必须实现")
+
   def setStmt(stmt: PreparedStatement, data: T): Unit
+
+  def setDeleteStmt(stmt: PreparedStatement, data: T): Unit = throw new Exception("hasDelete时必须实现")
 
   override def onInit(parameters: Configuration): Unit = {
     initConn()
     stmt = conn.prepareStatement(updateSql)
+    logWarning("gene_update_sql:" + updateSql)
+    if(hasDelete){
+      deleteStmt = conn.prepareStatement(deleteSql)
+      logWarning("gene_delete_sql:" + deleteSql)
+    }
   }
 
   final def initConn(): Unit = {
@@ -39,18 +52,13 @@ abstract class BatchIntervalJdbcSink[T](
     logInfo(s"sql:$updateSql")
   }
 
-  override final def onFlush(datas: Iterable[T]): Unit = {
-    if (periodExecSqlStrategy != null) {
-      periodExecSql()
-    }
-    logDebug("onFlush start")
-
+  private def jdbcOperateExec(func: => Unit): Unit = {
     var i = 0
     while (i <= maxRetries) {
       logDebug("Retriy num:" + i)
       try {
         // 成功直接返回
-        saveDatas(datas)
+        func
         return
       } catch {
         case e: SQLException =>
@@ -66,6 +74,12 @@ abstract class BatchIntervalJdbcSink[T](
                 stmt.close()
               }
               stmt = conn.prepareStatement(updateSql)
+              if(hasDelete){
+                if (deleteStmt != null) {
+                  deleteStmt.close()
+                }
+                deleteStmt = conn.prepareStatement(deleteSql)
+              }
             }
           } catch {
             case e: Exception =>
@@ -77,6 +91,32 @@ abstract class BatchIntervalJdbcSink[T](
     }
   }
 
+  override final def onFlush(datas: Iterable[T]): Unit = {
+    if (periodExecSqlStrategy != null) {
+      periodExecSql()
+    }
+    logDebug("onFlush start")
+
+    var datasSave:Iterable[T]  = null
+    var datasDelete:Iterable[T]  = null
+    if(!hasDelete){
+      datasSave = datas
+    }else{
+      val datasTuple = datas.partition(!isDeleteData(_))
+      datasSave = datasTuple._1
+      datasDelete = datasTuple._2
+    }
+
+    if(datasSave.nonEmpty){
+      logInfo(s"saveDatas:$datasSave")
+      jdbcOperateExec(saveDatas(datasSave))
+    }
+    if(hasDelete && datasDelete.nonEmpty){
+      logInfo(s"delDatas:$datasDelete")
+      jdbcOperateExec(delDatas(datasDelete))
+    }
+  }
+
   final def saveDatas(datas: Iterable[T]): Unit = {
     for (data <- datas) {
       //logWarning(data.toString)
@@ -84,6 +124,15 @@ abstract class BatchIntervalJdbcSink[T](
       stmt.addBatch()
     }
     stmt.executeBatch()
+  }
+
+  final def delDatas(datas: Iterable[T]): Unit = {
+    for (data <- datas) {
+      //logWarning(data.toString)
+      setDeleteStmt(deleteStmt, data)
+      deleteStmt.addBatch()
+    }
+    deleteStmt.executeBatch()
   }
 
   final def periodExecSql(): Unit = {
@@ -106,6 +155,10 @@ abstract class BatchIntervalJdbcSink[T](
     if (stmt != null) {
       logInfo("close stmt")
       stmt.close()
+    }
+    if (deleteStmt != null) {
+      logInfo("close deleteStmt")
+      deleteStmt.close()
     }
     if (conn != null) {
       logInfo("close conn")
