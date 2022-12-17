@@ -19,6 +19,7 @@ import scala.collection.JavaConverters._
 import com.flink.connector.common.Utils
 import com.flink.log.Logging
 import com.flink.utils.TsUtils.{DAY_UNIT, HOUR_UNIT, hourOfDay, minuteOfHour, weekDay}
+import org.apache.flink.streaming.api.functions.sink.SinkFunction
 
 package object jdbc extends Logging{
 
@@ -74,7 +75,8 @@ package object jdbc extends Logging{
       isUpdateMode: Boolean = true,
       oldValcols: Seq[String] = Nil,
       fieldColMap: Map[String, String] = Map.empty[String, String],
-      objectReuse: Boolean = false
+      objectReuse: Boolean = false,
+      connReuse: Boolean = false
     ): DataStreamSink[T] = {
       // 提醒作用, 调用者显示设置objectReuse=true则认为他知道objectReuse的影响
       assert(ds.executionEnvironment.getConfig.isObjectReuseEnabled == objectReuse)
@@ -92,39 +94,77 @@ package object jdbc extends Logging{
       logWarning("gene_sql:" + sql)
       println("gene_sql:" + sql)
 
-      ds.addSink(new BatchIntervalJdbcSink[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
-        minPauseBetweenFlushMs = minPauseBetweenFlushMs, maxRetries = maxRetries) {
-        val numFields: Int = names.length
+      val sink = if(!connReuse){
+        new BatchIntervalJdbcSink[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
+          minPauseBetweenFlushMs = minPauseBetweenFlushMs, maxRetries = maxRetries) {
+          val numFields: Int = names.length
 
-        override def updateSql: String = sql
+          override def updateSql: String = sql
 
-        override def setStmt(stmt: PreparedStatement, data: T): Unit = {
-          var i = 0
-          while (i < numFields) {
-            val v: AnyRef = data.productElement(i) match {
-              case null | None => null
-              case x: java.lang.Integer => x
-              case x: java.lang.Long => x
-              case x: java.lang.Double => x
-              case x: java.sql.Timestamp => x
-              case x: String => x
-              case Some(s: AnyRef) => s match {
+          override def setStmt(stmt: PreparedStatement, data: T): Unit = {
+            var i = 0
+            while (i < numFields) {
+              val v: AnyRef = data.productElement(i) match {
                 case null | None => null
                 case x: java.lang.Integer => x
                 case x: java.lang.Long => x
                 case x: java.lang.Double => x
                 case x: java.sql.Timestamp => x
                 case x: String => x
+                case Some(s: AnyRef) => s match {
+                  case null | None => null
+                  case x: java.lang.Integer => x
+                  case x: java.lang.Long => x
+                  case x: java.lang.Double => x
+                  case x: java.sql.Timestamp => x
+                  case x: String => x
+                  case x => throw new UnsupportedOperationException(s"unsupported data $x")
+                }
                 case x => throw new UnsupportedOperationException(s"unsupported data $x")
               }
-              case x => throw new UnsupportedOperationException(s"unsupported data $x")
+              stmt.setObject(i + 1, v)
+              i = i + 1
             }
-            stmt.setObject(i + 1, v)
-            i = i + 1
           }
-        }
 
-      }).name(s"jdbc-$tableName")
+        }
+      }else{
+        new BatchIntervalJdbcSinkV2[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
+          minPauseBetweenFlushMs = minPauseBetweenFlushMs, maxRetries = maxRetries) {
+          val numFields: Int = names.length
+
+          override def updateSql: String = sql
+
+          override def setStmt(stmt: PreparedStatement, data: T): Unit = {
+            var i = 0
+            while (i < numFields) {
+              val v: AnyRef = data.productElement(i) match {
+                case null | None => null
+                case x: java.lang.Integer => x
+                case x: java.lang.Long => x
+                case x: java.lang.Double => x
+                case x: java.sql.Timestamp => x
+                case x: String => x
+                case Some(s: AnyRef) => s match {
+                  case null | None => null
+                  case x: java.lang.Integer => x
+                  case x: java.lang.Long => x
+                  case x: java.lang.Double => x
+                  case x: java.sql.Timestamp => x
+                  case x: String => x
+                  case x => throw new UnsupportedOperationException(s"unsupported data $x")
+                }
+                case x => throw new UnsupportedOperationException(s"unsupported data $x")
+              }
+              stmt.setObject(i + 1, v)
+              i = i + 1
+            }
+          }
+
+        }
+      }
+
+      ds.addSink(sink).name(s"jdbc-$tableName")
     }
   }
 
@@ -145,7 +185,8 @@ package object jdbc extends Logging{
       hasDelete: Boolean = false,
       deleteKeyFields: Seq[String] = Nil,
       isDelete: T => Boolean = null,
-      objectReuse: Boolean = false
+      objectReuse: Boolean = false,
+      connReuse: Boolean = false
     ): DataStreamSink[T] = {
       // 提醒作用, 调用者显示设置objectReuse=true则认为他知道objectReuse的影响
       assert(ds.executionEnvironment.getConfig.isObjectReuseEnabled == objectReuse)
@@ -180,59 +221,117 @@ package object jdbc extends Logging{
       val delWhere = delCols.map(col => s"$col = ?").mkString(" and ")
       val delSql = s"delete from $tableName where $delWhere"
 
-      ds.addSink(new BatchIntervalJdbcSink[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
-        minPauseBetweenFlushMs = minPauseBetweenFlushMs, keyedMode = true, maxRetries = maxRetries, hasDelete = hasDelete) {
-        val numFields: Int = names.length
-        val delInfos = delIdx.zipWithIndex
+      val sink = if(!connReuse){
+        new BatchIntervalJdbcSink[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
+          minPauseBetweenFlushMs = minPauseBetweenFlushMs, keyedMode = true, maxRetries = maxRetries, hasDelete = hasDelete) {
+          val numFields: Int = names.length
+          val delInfos = delIdx.zipWithIndex
 
-        override def updateSql: String = sql
+          override def updateSql: String = sql
 
-        override def getKey(data: T): Any = keyFunc(data)
+          override def getKey(data: T): Any = keyFunc(data)
 
-        override def deleteSql: String = delSql
+          override def deleteSql: String = delSql
 
-        override def isDeleteData(data: T): Boolean = isDelete(data)
+          override def isDeleteData(data: T): Boolean = isDelete(data)
 
-        override def replaceValue(newValue: T, oldValue: T): T = replaceDaTaValue(newValue, oldValue)
+          override def replaceValue(newValue: T, oldValue: T): T = replaceDaTaValue(newValue, oldValue)
 
-        override def setStmt(stmt: PreparedStatement, row: T): Unit = {
-          val data = dateFunc(row)
-          var i = 0
-          while (i < numFields) {
-            val v: AnyRef = value2Jdbc(data.productElement(i))
-            stmt.setObject(i + 1, v)
-            i = i + 1
+          override def setStmt(stmt: PreparedStatement, row: T): Unit = {
+            val data = dateFunc(row)
+            var i = 0
+            while (i < numFields) {
+              val v: AnyRef = value2Jdbc(data.productElement(i))
+              stmt.setObject(i + 1, v)
+              i = i + 1
+            }
           }
-        }
 
-        override def setDeleteStmt(stmt: PreparedStatement, row: T): Unit = {
-          val data = dateFunc(row)
-          for ((elePos, i) <- delInfos) {
-            val v: AnyRef = value2Jdbc(data.productElement(elePos))
-            stmt.setObject(i + 1, v)
+          override def setDeleteStmt(stmt: PreparedStatement, row: T): Unit = {
+            val data = dateFunc(row)
+            for ((elePos, i) <- delInfos) {
+              val v: AnyRef = value2Jdbc(data.productElement(elePos))
+              stmt.setObject(i + 1, v)
+            }
           }
-        }
 
-        def value2Jdbc(value: Any): AnyRef = value match {
-          case null | None => null
-          case x: java.lang.Integer => x
-          case x: java.lang.Long => x
-          case x: java.lang.Double => x
-          case x: java.sql.Timestamp => x
-          case x: String => x
-          case Some(s: AnyRef) => s match {
+          def value2Jdbc(value: Any): AnyRef = value match {
             case null | None => null
             case x: java.lang.Integer => x
             case x: java.lang.Long => x
             case x: java.lang.Double => x
             case x: java.sql.Timestamp => x
             case x: String => x
+            case Some(s: AnyRef) => s match {
+              case null | None => null
+              case x: java.lang.Integer => x
+              case x: java.lang.Long => x
+              case x: java.lang.Double => x
+              case x: java.sql.Timestamp => x
+              case x: String => x
+              case x => throw new UnsupportedOperationException(s"unsupported data $x")
+            }
             case x => throw new UnsupportedOperationException(s"unsupported data $x")
           }
-          case x => throw new UnsupportedOperationException(s"unsupported data $x")
-        }
 
-      }).name(s"jdbc-$tableName")
+        }
+      }else{
+        new BatchIntervalJdbcSinkV2[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
+          minPauseBetweenFlushMs = minPauseBetweenFlushMs, keyedMode = true, maxRetries = maxRetries, hasDelete = hasDelete) {
+          val numFields: Int = names.length
+          val delInfos = delIdx.zipWithIndex
+
+          override def updateSql: String = sql
+
+          override def getKey(data: T): Any = keyFunc(data)
+
+          override def deleteSql: String = delSql
+
+          override def isDeleteData(data: T): Boolean = isDelete(data)
+
+          override def replaceValue(newValue: T, oldValue: T): T = replaceDaTaValue(newValue, oldValue)
+
+          override def setStmt(stmt: PreparedStatement, row: T): Unit = {
+            val data = dateFunc(row)
+            var i = 0
+            while (i < numFields) {
+              val v: AnyRef = value2Jdbc(data.productElement(i))
+              stmt.setObject(i + 1, v)
+              i = i + 1
+            }
+          }
+
+          override def setDeleteStmt(stmt: PreparedStatement, row: T): Unit = {
+            val data = dateFunc(row)
+            for ((elePos, i) <- delInfos) {
+              val v: AnyRef = value2Jdbc(data.productElement(elePos))
+              stmt.setObject(i + 1, v)
+            }
+          }
+
+          def value2Jdbc(value: Any): AnyRef = value match {
+            case null | None => null
+            case x: java.lang.Integer => x
+            case x: java.lang.Long => x
+            case x: java.lang.Double => x
+            case x: java.sql.Timestamp => x
+            case x: String => x
+            case Some(s: AnyRef) => s match {
+              case null | None => null
+              case x: java.lang.Integer => x
+              case x: java.lang.Long => x
+              case x: java.lang.Double => x
+              case x: java.sql.Timestamp => x
+              case x: String => x
+              case x => throw new UnsupportedOperationException(s"unsupported data $x")
+            }
+            case x => throw new UnsupportedOperationException(s"unsupported data $x")
+          }
+
+        }
+      }
+
+      ds.addSink(sink).name(s"jdbc-$tableName")
 
     }
   }
@@ -259,14 +358,15 @@ package object jdbc extends Logging{
     maxRetries: Int = 2,
     isUpdateMode: Boolean = true,
     oldValcols: Seq[String] = Nil,
-    periodExecSqlStrategy: PeriodExecSqlStrategy = null
+    periodExecSqlStrategy: PeriodExecSqlStrategy = null,
+    connReuse: Boolean = false
   )
 
 
   def getRowDataBatchIntervalJdbcSink(
     resolvedSchema: ResolvedSchema,
     params: JdbcSinkParams
-  ): BatchIntervalJdbcSink[RowData] = {
+  ): SinkFunction[RowData] = {
     val typeInformation: InternalTypeInfo[RowData] = InternalTypeInfo.of(resolvedSchema.toSourceRowDataType.getLogicalType)
     val fieldInfos = resolvedSchema.getColumns.asScala.map(col => (col.getName, col.getDataType)).toArray
     val cols = fieldInfos.map(_._1)
@@ -275,48 +375,96 @@ package object jdbc extends Logging{
     val _getKey = Utils.getTableKeyFunction(resolvedSchema,params.keyedMode,params.keys)
     val tableOrdering = Utils.getTableOrdering(resolvedSchema, params.orderBy)
 
-    new BatchIntervalJdbcSink[RowData](params.connectionOptions, params.batchSize, params.batchIntervalMs, params.minPauseBetweenFlushMs,
-      params.keyedMode, params.maxRetries, params.periodExecSqlStrategy) {
-      val setters = _setters
-      val numFields = setters.length
-      @transient var serializer: TypeSerializer[RowData] = _
-      @transient var objectReuse = false
+    if(!params.connReuse){
+      new BatchIntervalJdbcSink[RowData](params.connectionOptions, params.batchSize, params.batchIntervalMs, params.minPauseBetweenFlushMs,
+        params.keyedMode, params.maxRetries, params.periodExecSqlStrategy) {
+        val setters = _setters
+        val numFields = setters.length
+        @transient var serializer: TypeSerializer[RowData] = _
+        @transient var objectReuse = false
 
-      def updateSql: String = sql
+        def updateSql: String = sql
 
-      override def onInit(parameters: Configuration): Unit = {
-        super.onInit(parameters)
-        objectReuse = getRuntimeContext.getExecutionConfig.isObjectReuseEnabled
-        if (objectReuse) {
-          serializer = typeInformation.createSerializer(getRuntimeContext.getExecutionConfig)
-        }
-      }
-
-      override def valueTransform(data: RowData): RowData = {
-        if (objectReuse) serializer.copy(data) else data
-      }
-
-      override def getKey(data: RowData): Any = _getKey(data)
-
-      override def replaceValue(newValue: RowData, oldValue: RowData): RowData = if (!this.keyedMode) {
-        super.replaceValue(newValue, oldValue)
-      } else {
-        if (tableOrdering.gteq(newValue, oldValue)) {
-          newValue
-        } else {
-          oldValue
-        }
-      }
-
-      def setStmt(stmt: PreparedStatement, row: RowData): Unit = {
-        var i = 0
-        while (i < numFields) {
-          if (row.isNullAt(i)) {
-            stmt.setObject(i + 1, null)
-          } else {
-            setters(i).apply(stmt, row, i)
+        override def onInit(parameters: Configuration): Unit = {
+          super.onInit(parameters)
+          objectReuse = getRuntimeContext.getExecutionConfig.isObjectReuseEnabled
+          if (objectReuse) {
+            serializer = typeInformation.createSerializer(getRuntimeContext.getExecutionConfig)
           }
-          i += 1
+        }
+
+        override def valueTransform(data: RowData): RowData = {
+          if (objectReuse) serializer.copy(data) else data
+        }
+
+        override def getKey(data: RowData): Any = _getKey(data)
+
+        override def replaceValue(newValue: RowData, oldValue: RowData): RowData = if (!this.keyedMode) {
+          super.replaceValue(newValue, oldValue)
+        } else {
+          if (tableOrdering.gteq(newValue, oldValue)) {
+            newValue
+          } else {
+            oldValue
+          }
+        }
+
+        def setStmt(stmt: PreparedStatement, row: RowData): Unit = {
+          var i = 0
+          while (i < numFields) {
+            if (row.isNullAt(i)) {
+              stmt.setObject(i + 1, null)
+            } else {
+              setters(i).apply(stmt, row, i)
+            }
+            i += 1
+          }
+        }
+      }
+    }else{
+      new BatchIntervalJdbcSinkV2[RowData](params.connectionOptions, params.batchSize, params.batchIntervalMs, params.minPauseBetweenFlushMs,
+        params.keyedMode, params.maxRetries, params.periodExecSqlStrategy) {
+        val setters = _setters
+        val numFields = setters.length
+        @transient var serializer: TypeSerializer[RowData] = _
+        @transient var objectReuse = false
+
+        def updateSql: String = sql
+
+        override def onInit(parameters: Configuration): Unit = {
+          super.onInit(parameters)
+          objectReuse = getRuntimeContext.getExecutionConfig.isObjectReuseEnabled
+          if (objectReuse) {
+            serializer = typeInformation.createSerializer(getRuntimeContext.getExecutionConfig)
+          }
+        }
+
+        override def valueTransform(data: RowData): RowData = {
+          if (objectReuse) serializer.copy(data) else data
+        }
+
+        override def getKey(data: RowData): Any = _getKey(data)
+
+        override def replaceValue(newValue: RowData, oldValue: RowData): RowData = if (!this.keyedMode) {
+          super.replaceValue(newValue, oldValue)
+        } else {
+          if (tableOrdering.gteq(newValue, oldValue)) {
+            newValue
+          } else {
+            oldValue
+          }
+        }
+
+        def setStmt(stmt: PreparedStatement, row: RowData): Unit = {
+          var i = 0
+          while (i < numFields) {
+            if (row.isNullAt(i)) {
+              stmt.setObject(i + 1, null)
+            } else {
+              setters(i).apply(stmt, row, i)
+            }
+            i += 1
+          }
         }
       }
     }

@@ -23,6 +23,8 @@ abstract class JdbcBatchStatement[T](
 
   def isDeleteData(data: T): Boolean
 
+  override def logName = classOf[JdbcBatchStatement[_]].getName
+
   def setStmt(stmt: PreparedStatement, data: T): Unit
 
   def setDeleteStmt(stmt: PreparedStatement, data: T): Unit
