@@ -31,6 +31,10 @@ object JsonUtil {
     javaMapper.readValue(content, cls)
   }
 
+  def readValue[T](content: Array[Byte], cls: Class[T]): T ={
+    javaMapper.readValue(content, cls)
+  }
+
   def readValue[T: Manifest](content: String): T ={
     javaMapper.readValue(content)
   }
@@ -40,6 +44,10 @@ object JsonUtil {
   }
 
   def readScValue[T](content: String, cls: Class[T]): T ={
+    scMapper.readValue(content, cls)
+  }
+
+  def readScValue[T](content: Array[Byte], cls: Class[T]): T ={
     scMapper.readValue(content, cls)
   }
 
