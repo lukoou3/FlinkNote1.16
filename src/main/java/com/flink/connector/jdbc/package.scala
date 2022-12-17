@@ -1,7 +1,6 @@
 package com.flink.connector
 
 import java.sql.PreparedStatement
-
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.scala.typeutils.CaseClassTypeInfo
@@ -17,11 +16,11 @@ import org.apache.flink.table.types.logical.LogicalType
 import org.apache.flink.table.types.logical.LogicalTypeRoot.{BIGINT, CHAR, DOUBLE, FLOAT, INTEGER, VARCHAR}
 
 import scala.collection.JavaConverters._
-
 import com.flink.connector.common.Utils
+import com.flink.log.Logging
 import com.flink.utils.TsUtils.{DAY_UNIT, HOUR_UNIT, hourOfDay, minuteOfHour, weekDay}
 
-package object jdbc {
+package object jdbc extends Logging{
 
   //JdbcSinkOptions
   //JdbcConnectionOptions
@@ -90,6 +89,8 @@ package object jdbc {
       val names = fieldNames //fieldNames.zipWithIndex
 
       val sql = geneFlinkJdbcSql(tableName, cols, oldValcols, isUpdateMode)
+      logWarning("gene_sql:" + sql)
+      println("gene_sql:" + sql)
 
       ds.addSink(new BatchIntervalJdbcSink[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
         minPauseBetweenFlushMs = minPauseBetweenFlushMs, maxRetries = maxRetries) {
@@ -101,11 +102,21 @@ package object jdbc {
           var i = 0
           while (i < numFields) {
             val v: AnyRef = data.productElement(i) match {
-              case null => null
+              case null | None => null
               case x: java.lang.Integer => x
               case x: java.lang.Long => x
+              case x: java.lang.Double => x
               case x: java.sql.Timestamp => x
               case x: String => x
+              case Some(s: AnyRef) => s match {
+                case null | None => null
+                case x: java.lang.Integer => x
+                case x: java.lang.Long => x
+                case x: java.lang.Double => x
+                case x: java.sql.Timestamp => x
+                case x: String => x
+                case x => throw new UnsupportedOperationException(s"unsupported data $x")
+              }
               case x => throw new UnsupportedOperationException(s"unsupported data $x")
             }
             stmt.setObject(i + 1, v)
@@ -113,7 +124,7 @@ package object jdbc {
           }
         }
 
-      })
+      }).name(s"jdbc-$tableName")
     }
   }
 
@@ -128,8 +139,12 @@ package object jdbc {
       maxRetries: Int = 2,
       fieldsForTuple: Seq[String] = Nil,
       isUpdateMode: Boolean = true,
+      fieldMappingExclude: Seq[String] = Nil,
       oldValcols: Seq[String] = Nil,
       fieldColMap: Map[String, String] = Map.empty[String, String],
+      hasDelete: Boolean = false,
+      deleteKeyFields: Seq[String] = Nil,
+      isDelete: T => Boolean = null,
       objectReuse: Boolean = false
     ): DataStreamSink[T] = {
       // 提醒作用, 调用者显示设置objectReuse=true则认为他知道objectReuse的影响
@@ -141,18 +156,42 @@ package object jdbc {
         assert(fieldsForTuple.length == productTypeInformation.fieldNames.length)
         fieldsForTuple
       }
-      val cols = fieldNames.map(x => fieldColMap.getOrElse(x, x))
-      val names = fieldNames //fieldNames.zipWithIndex
+
+      // 为了实现简单，排除的属性必须定义在最后面
+      if(fieldMappingExclude.nonEmpty){
+        assert(fieldNames.endsWith(fieldMappingExclude), "排除的属性必须定义在最后面")
+      }
+
+      if(hasDelete){
+        assert(isUpdateMode, "删除必须是UpdateMode")
+        assert(deleteKeyFields.nonEmpty, "删除必须deleteKeyFields.nonEmpty")
+        assert(isDelete != null, "删除必须isDelete != null")
+      }
+
+      val colFieldNames = fieldNames.filter(!fieldMappingExclude.contains(_))
+      val cols = colFieldNames.map(x => fieldColMap.getOrElse(x, x))
+      val names = colFieldNames //colFieldNames.zipWithIndex
 
       val sql = geneFlinkJdbcSql(tableName, cols, oldValcols, isUpdateMode)
 
+      val delIdx = fieldNames.zipWithIndex.filter(x => deleteKeyFields.contains(x._1)).map(_._2)
+      assert(deleteKeyFields.length == delIdx.length, "deleteKeyFields存在未知的属性")
+      val delCols = deleteKeyFields.map(x => fieldColMap.getOrElse(x, x))
+      val delWhere = delCols.map(col => s"$col = ?").mkString(" and ")
+      val delSql = s"delete from $tableName where $delWhere"
+
       ds.addSink(new BatchIntervalJdbcSink[T](connectionOptions, batchSize = batchSize, batchIntervalMs = batchIntervalMs,
-        minPauseBetweenFlushMs = minPauseBetweenFlushMs, keyedMode = true, maxRetries = maxRetries) {
+        minPauseBetweenFlushMs = minPauseBetweenFlushMs, keyedMode = true, maxRetries = maxRetries, hasDelete = hasDelete) {
         val numFields: Int = names.length
+        val delInfos = delIdx.zipWithIndex
 
         override def updateSql: String = sql
 
         override def getKey(data: T): Any = keyFunc(data)
+
+        override def deleteSql: String = delSql
+
+        override def isDeleteData(data: T): Boolean = isDelete(data)
 
         override def replaceValue(newValue: T, oldValue: T): T = replaceDaTaValue(newValue, oldValue)
 
@@ -160,19 +199,40 @@ package object jdbc {
           val data = dateFunc(row)
           var i = 0
           while (i < numFields) {
-            val v: AnyRef = data.productElement(i) match {
-              case null => null
-              case x: java.lang.Integer => x
-              case x: java.lang.Long => x
-              case x: java.sql.Timestamp => x
-              case x => x.toString
-            }
+            val v: AnyRef = value2Jdbc(data.productElement(i))
             stmt.setObject(i + 1, v)
             i = i + 1
           }
         }
 
-      })
+        override def setDeleteStmt(stmt: PreparedStatement, row: T): Unit = {
+          val data = dateFunc(row)
+          for ((elePos, i) <- delInfos) {
+            val v: AnyRef = value2Jdbc(data.productElement(elePos))
+            stmt.setObject(i + 1, v)
+          }
+        }
+
+        def value2Jdbc(value: Any): AnyRef = value match {
+          case null | None => null
+          case x: java.lang.Integer => x
+          case x: java.lang.Long => x
+          case x: java.lang.Double => x
+          case x: java.sql.Timestamp => x
+          case x: String => x
+          case Some(s: AnyRef) => s match {
+            case null | None => null
+            case x: java.lang.Integer => x
+            case x: java.lang.Long => x
+            case x: java.lang.Double => x
+            case x: java.sql.Timestamp => x
+            case x: String => x
+            case x => throw new UnsupportedOperationException(s"unsupported data $x")
+          }
+          case x => throw new UnsupportedOperationException(s"unsupported data $x")
+        }
+
+      }).name(s"jdbc-$tableName")
 
     }
   }
