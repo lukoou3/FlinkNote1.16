@@ -26,7 +26,7 @@ import scala.beans.BeanProperty
  * @tparam D1 data1
  * @tparam D2 data2
  */
-class Unoin2JoinKeyedProcessFunctionV2[K, D1: TypeInformation, D2: TypeInformation](
+class Unoin2JoinKeyedProcessFunctionV2[K, D1>:Null: TypeInformation, D2>:Null: TypeInformation](
   ttlConfs: (Option[StateTtlConfig], Option[StateTtlConfig]) = (TtlConf(), TtlConf()),
   delayMs: Long = 3000,
   isReplaceAndHandleData1: IsReplaceAndHandleData[D1] = defaultIsReplaceAndHandleData[D1],
@@ -124,10 +124,18 @@ class Unoin2JoinKeyedProcessFunctionV2[K, D1: TypeInformation, D2: TypeInformati
     }
   }
 
+  def tryQueryElement1(key: K): D1 = {
+    null
+  }
+
+  def tryQueryElement2(key: K): D2 = {
+    null
+  }
+
   override def onTimer(timestamp: Long, ctx: KeyedProcessFunction[K, I, O]#OnTimerContext, out: Collector[O]): Unit = {
     timeState.clear()
-    val data1 = data1State.value()
-    val data2 = data2State.value()
+    var data1 = data1State.value()
+    var data2 = data2State.value()
     if (data1 != null && data2 != null) {
 
     } else {
@@ -135,8 +143,21 @@ class Unoin2JoinKeyedProcessFunctionV2[K, D1: TypeInformation, D2: TypeInformati
         outData = new Unoin2Data[K, D1, D2]()
       }
 
-      outData.setKey(ctx.getCurrentKey)
+      val key = ctx.getCurrentKey
+      outData.setKey(key)
+      if(data1 == null){
+        data1 = tryQueryElement1(key)
+        if(data1 != null){
+          data1State.update(data1)
+        }
+      }
       outData.setData1(data1)
+      if(data2 == null){
+        data2 = tryQueryElement2(key)
+        if(data2 != null){
+          data2State.update(data2)
+        }
+      }
       outData.setData2(data2)
       out.collect(outData)
     }
@@ -148,7 +169,7 @@ object Unoin2JoinKeyedProcessFunctionV2{
 
   def defaultIsReplaceAndHandleData[D]:IsReplaceAndHandleData[D] = (newData:D, oldData:D, tip: ReplaceAndHandleDataTip) => {}
 
-  def union[D1, D2, K](ds1: DataStream[D1], ds2: DataStream[D2])(getKey1: D1 => K, getKey2: D2 => K)
+  def union[D1>:Null, D2>:Null, K](ds1: DataStream[D1], ds2: DataStream[D2])(getKey1: D1 => K, getKey2: D2 => K)
     (implicit typeInfo:TypeInformation[Unoin2Data[K, D1, D2]], keyTypeInfo:TypeInformation[K]): KeyedStream[Unoin2Data[K, D1, D2], K] ={
     ds1.map(new MapFunction[D1, Unoin2Data[K, D1, D2]]{
       val data = new Unoin2Data[K, D1, D2]
