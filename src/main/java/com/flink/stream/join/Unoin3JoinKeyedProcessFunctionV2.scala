@@ -13,7 +13,7 @@ import org.apache.flink.util.Collector
 import scala.beans.BeanProperty
 import Unoin3JoinKeyedProcessFunctionV2._
 
-class Unoin3JoinKeyedProcessFunctionV2[K, D1: TypeInformation, D2: TypeInformation, D3: TypeInformation](
+class Unoin3JoinKeyedProcessFunctionV2[K, D1>:Null: TypeInformation, D2>:Null: TypeInformation, D3>:Null: TypeInformation](
   ttlConfs: (Option[StateTtlConfig], Option[StateTtlConfig], Option[StateTtlConfig]) = (TtlConf(), TtlConf(), TtlConf()),
   delayMs: Long = 3000,
   isReplaceAndHandleData1: IsReplaceAndHandleData[D1] = defaultIsReplaceAndHandleData[D1],
@@ -154,11 +154,23 @@ class Unoin3JoinKeyedProcessFunctionV2[K, D1: TypeInformation, D2: TypeInformati
     }
   }
 
+  def tryQueryElement1(key: K): D1 = {
+    null
+  }
+
+  def tryQueryElement2(key: K): D2 = {
+    null
+  }
+
+  def tryQueryElement3(key: K): D3 = {
+    null
+  }
+
   override def onTimer(timestamp: Long, ctx: KeyedProcessFunction[K, I, O]#OnTimerContext, out: Collector[O]): Unit = {
     timeState.clear()
-    val data1 = data1State.value()
-    val data2 = data2State.value()
-    val data3 = data3State.value()
+    var data1 = data1State.value()
+    var data2 = data2State.value()
+    var data3 = data3State.value()
     if (data1 != null && data2 != null && data3 != null) {
 
     } else {
@@ -166,9 +178,28 @@ class Unoin3JoinKeyedProcessFunctionV2[K, D1: TypeInformation, D2: TypeInformati
         outData = new Unoin3Data[K, D1, D2, D3]()
       }
 
-      outData.setKey(ctx.getCurrentKey)
+      val key = ctx.getCurrentKey
+      outData.setKey(key)
+      if(data1 == null){
+        data1 = tryQueryElement1(key)
+        if(data1 != null){
+          data1State.update(data1)
+        }
+      }
       outData.setData1(data1)
+      if(data2 == null){
+        data2 = tryQueryElement2(key)
+        if(data2 != null){
+          data2State.update(data2)
+        }
+      }
       outData.setData2(data2)
+      if(data3 == null){
+        data3 = tryQueryElement3(key)
+        if(data3 != null){
+          data3State.update(data3)
+        }
+      }
       outData.setData3(data3)
       out.collect(outData)
     }
@@ -180,7 +211,7 @@ object Unoin3JoinKeyedProcessFunctionV2 {
 
   def defaultIsReplaceAndHandleData[D]:IsReplaceAndHandleData[D] = (newData:D, oldData:D, tip: ReplaceAndHandleDataTip) => {}
 
-  def union[D1, D2, D3, K](ds1: DataStream[D1], ds2: DataStream[D2], ds3: DataStream[D3])(getKey1: D1 => K, getKey2: D2 => K, getKey3: D3 => K)
+  def union[D1>:Null, D2>:Null, D3>:Null, K](ds1: DataStream[D1], ds2: DataStream[D2], ds3: DataStream[D3])(getKey1: D1 => K, getKey2: D2 => K, getKey3: D3 => K)
     (implicit typeInfo:TypeInformation[Unoin3Data[K, D1, D2, D3]], keyTypeInfo:TypeInformation[K]): KeyedStream[Unoin3Data[K, D1, D2, D3], K] ={
     ds1.map(new MapFunction[D1, Unoin3Data[K, D1, D2, D3]]{
       val data = new Unoin3Data[K, D1, D2, D3]
