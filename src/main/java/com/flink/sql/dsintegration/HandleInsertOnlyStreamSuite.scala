@@ -313,12 +313,25 @@ class HandleInsertOnlyStreamSuite extends FlinkBaseSuite{
       name string,
       age int,
       cnt bigint,
+      data row<name string, age int>,
+      names array<string>,
+      datas array<row<name string, age int>>,
       proctime as proctime()
     ) WITH (
       'connector' = 'faker',
       'fields.name.expression' = '#{superhero.name}',
       'fields.age.expression' = '#{number.numberBetween ''0'',''20''}',
       'fields.cnt.expression' = '#{number.numberBetween ''0'',''20000000000''}',
+      'fields.data.name.expression' = '#{harry_potter.spell}',
+      'fields.data.age.expression' = '#{number.numberBetween ''20'',''30''}',
+      'fields.data.null-rate' = '0.3',
+      'fields.names.expression' = '#{harry_potter.spell}',
+      'fields.names.length' = '3',
+      'fields.names.null-rate' = '0.3',
+      'fields.datas.name.expression' = '#{harry_potter.spell}',
+      'fields.datas.age.expression' = '#{number.numberBetween ''20'',''30''}',
+      'fields.datas.length' = '3',
+      'fields.datas.null-rate' = '0.3',
       'rows-per-second' = '1'
     )
     """
@@ -329,7 +342,7 @@ class HandleInsertOnlyStreamSuite extends FlinkBaseSuite{
     val rowDs: DataStream[Row] = table.toDataStream
     println(rowDs.dataType)
 
-    rowDs.addSink { row =>
+    rowDs.filter(x => true).addSink { row =>
       println(row)
     }
   }

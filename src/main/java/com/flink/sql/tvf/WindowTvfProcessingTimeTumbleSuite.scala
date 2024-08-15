@@ -61,5 +61,41 @@ class WindowTvfProcessingTimeTumbleSuite extends FlinkBaseSuite{
     rstTable.execute().print()
   }
 
+  /**
+   * 代码生成最终都会调用GeneratedClass的构造函数
+   * org.apache.flink.table.runtime.generated.GeneratedClass
+   */
+  test("TestTumbleAGGCodeGene"){
+    // 每个分区：每秒1个。整个应用：每秒2个，5秒10个
+    val onlineLog: DataStream[OnlineLog] = env.addSource(new OnlineLogSouce(count = 1, sleepMillis = 1000, pageNum=1))
+    println("Source parallelism:" + onlineLog.parallelism)
 
+    // 声明一个额外的字段作为处理时间属性字段
+    // 使用case类时，定义的列可以选择自定义顺序, 使用元组就不行
+    // tEnv.createTemporaryView("tmp_tb", onlineLog, 'timeStr as 'ptime, 'pageId as 'page_id, 'visitCnt as 'cnt, 'ts.proctime)
+    tEnv.createTemporaryView("tmp_tb",
+      tEnv.fromDataStream(onlineLog,'timeStr as 'ptime, 'pageId as 'page_id, 'visitCnt as 'cnt, 'ts.proctime)
+    )
+    // 不行，proctime必须定义在table生成之前
+    //tEnv.createTemporaryView("tmp_tb", tEnv.fromDataStream(onlineLog).select('timeStr as 'ptime, 'pageId as 'page_id, 'visitCnt as 'cnt, 'ts.proctime))
+
+    val sql =
+      """
+    select
+        window_start wstart,
+        window_end wend,
+        min(ptime) min_ptime,
+        max(ptime) max_ptime,
+        page_id,
+        sum(cnt) pv,
+        count(distinct page_id) page_cnt
+    from table( tumble(table tmp_tb, descriptor(ts), interval '5' second) )
+    group by window_start, window_end, page_id
+    """
+    val rstTable = tEnv.sqlQuery(sql)
+    rstTable.printSchema()
+
+    //rstTable.toAppendStream[Row].print()
+    rstTable.execute().print()
+  }
 }
